@@ -1,0 +1,28 @@
+name: Execucao Diaria TCM-PA
+
+on:
+  schedule:
+    # Roda todos os dias às 06:00 AM UTC (03:00 AM no horário de Brasília)
+    - cron: '0 6 * * *'
+  workflow_dispatch: # Permite que você clique em um botão para testar manualmente quando quiser
+
+jobs:
+  executar:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Baixar codigo do repositorio
+        uses: actions/checkout@v3
+
+      - name: Configurar ambiente Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.10'
+
+      - name: Instalar dependencias
+        run: |
+          pip install -r requirements.txt
+
+      - name: Executar Script Python
+        env:
+          GOOGLE_KEY_JSON: ${{ secrets.GOOGLE_KEY_JSON }}
+        run: python main.py
