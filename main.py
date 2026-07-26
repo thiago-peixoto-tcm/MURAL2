@@ -19,7 +19,7 @@ from google.oauth2.service_account import Credentials
 MODO_TESTE = True
 
 # Nome exato da planilha criada e compartilhada no seu Google Drive
-NOME_PLANILHA = "Base Licitacoes TCMPA"
+NOME_PLANILHA = "BaseLicitacoes"
 # ==============================================================================
 
 
