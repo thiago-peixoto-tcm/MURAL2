@@ -1,5 +1,4 @@
-selenium
-webdriver-manager
+DrissionPage
 beautifulsoup4
 pandas
 gspread
