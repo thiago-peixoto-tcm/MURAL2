@@ -1,5 +1,4 @@
-playwright
-beautifulsoup4
+requests
 pandas
 gspread
 google-auth
