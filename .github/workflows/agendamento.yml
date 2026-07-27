@@ -17,13 +17,11 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Instalar Firefox Navegador
-        run: |
-          sudo apt-get update
-          sudo apt-get install -y firefox
-
       - name: Instalar Dependências Python
         run: pip install -r requirements.txt
+
+      - name: Instalar Navegadores Playwright
+        run: python -m playwright install firefox --with-deps
 
       - name: Executar Scraper
         env:
