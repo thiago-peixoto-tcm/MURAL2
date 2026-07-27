@@ -1,71 +1,72 @@
 import os
 import json
 import requests
+from bs4 import BeautifulSoup
 import gspread
 from google.oauth2.service_account import Credentials
 
-def testar_api_tcm():
-    # Endpoints comuns usados pelo framework do TCM-PA
-    endpoints = [
-        "https://www.tcmpa.tc.br/mural-de-licitacoes/licitacoes/listagem-json?page=1&per-page=100",
-        "https://www.tcmpa.tc.br/mural-de-licitacoes/api/licitacoes?page=1&per-page=100",
-        "https://www.tcmpa.tc.br/mural-de-licitacoes/licitacoes/get-dados?page=1&per-page=100",
-        "https://www.tcmpa.tc.br/mural-de-licitacoes/licitacoes/listagem?page=1&per-page=100&_format=json"
-    ]
+def extrair_licitacoes(paginas=1):
+    api_key = os.environ.get('SCRAPER_API_KEY')
+    dados = []
     
-    headers = {
-        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-        'Accept': 'application/json, text/javascript, */*; q=0.01',
-        'X-Requested-With': 'XMLHttpRequest', # Identifica requisição AJAX/API
-        'Referer': 'https://www.tcmpa.tc.br/mural-de-licitacoes/licitacoes/listagem'
-    }
-    
-    dados_extraidos = []
-
-    for url in endpoints:
-        print(f"Testando endpoint: {url}")
+    for page in range(1, paginas + 1):
+        print(f"Buscando página {page} via ScraperAPI...")
+        target_url = f"https://www.tcmpa.tc.br/mural-de-licitacoes/licitacoes/listagem?page={page}&per-page=100"
+        
+        # ScraperAPI fura o Cloudflare usando IP residencial do Brasil
+        scraper_url = f"http://api.scraperapi.com?api_key={api_key}&url={target_url}&country_code=br"
+        
         try:
-            response = requests.get(url, headers=headers, timeout=15)
-            print(f"Status Code: {response.status_code}")
+            response = requests.get(scraper_url, timeout=90)
+            if response.status_code != 200:
+                print(f"Erro na requisição. Status: {response.status_code}")
+                continue
+                
+            soup = BeautifulSoup(response.text, 'html.parser')
+            tbody = soup.find('tbody')
             
-            if response.status_code == 200:
-                try:
-                    data = response.json()
-                    print("✅ SUCESSO! A API respondeu com dados JSON válidos.")
+            if not tbody:
+                print(f"Tabela não encontrada na página {page}.")
+                continue
+                
+            linhas = tbody.find_all('tr')
+            print(f"✅ SUCESSO! Encontradas {len(linhas)} licitações na página {page}.")
+            
+            for linha in linhas:
+                colunas = linha.find_all('td')
+                if len(colunas) < 11:
+                    continue
                     
-                    # Tenta mapear os itens retornados no JSON
-                    items = data.get('items', data if isinstance(data, list) else [])
-                    
-                    for item in items:
-                        # Extrai os campos se existirem na estrutura JSON
-                        dados_extraidos.append([
-                            str(item.get('legislacao', '')),
-                            str(item.get('numero', '')),
-                            str(item.get('modalidade', '')),
-                            str(item.get('tipo', '')),
-                            str(item.get('objeto', '')),
-                            str(item.get('abertura', '')),
-                            str(item.get('publicacao', '')),
-                            str(item.get('municipio', '')),
-                            str(item.get('orgao', '')),
-                            str(item.get('situacao', '')),
-                            str(item.get('referencia', '')),
-                            str(item.get('adjudicado', '')),
-                            str(item.get('link', ''))
-                        ])
-                    
-                    if dados_extraidos:
-                        return dados_extraidos
-                except Exception as json_err:
-                    print(f"Resposta de {url} não é um JSON válido: {json_err}")
+                link_tag = colunas[1].find('a')
+                link_ficha = ""
+                if link_tag and 'href' in link_tag.attrs:
+                    href = link_tag['href']
+                    link_ficha = href if href.startswith('http') else f"https://www.tcmpa.tc.br{href}"
+
+                item = [
+                    colunas[0].get_text(strip=True),
+                    colunas[1].get_text(strip=True),
+                    colunas[2].get_text(strip=True),
+                    colunas[3].get_text(strip=True),
+                    colunas[4].get_text(strip=True),
+                    colunas[5].get_text(strip=True),
+                    colunas[6].get_text(strip=True),
+                    colunas[7].get_text(strip=True),
+                    colunas[8].get_text(strip=True),
+                    colunas[9].get_text(strip=True),
+                    colunas[10].get_text(strip=True),
+                    colunas[11].get_text(strip=True) if len(colunas) > 11 else "",
+                    link_ficha
+                ]
+                dados.append(item)
         except Exception as e:
-            print(f"Erro ao acessar {url}: {e}")
+            print(f"Erro ao processar página {page}: {e}")
             
-    return dados_extraidos
+    return dados
 
 def atualizar_google_sheets(dados):
     if not dados:
-        print("Nenhum dado capturado via API.")
+        print("Nenhum dado capturado.")
         return
 
     scopes = [
@@ -88,9 +89,9 @@ def atualizar_google_sheets(dados):
     sheet.clear()
     sheet.append_row(cabecalhos)
     sheet.append_rows(dados)
-    print("Planilha BaseLicitacoes atualizada com sucesso via API!")
+    print("Planilha BaseLicitacoes atualizada com sucesso no Google Drive!")
 
 if __name__ == "__main__":
-    licitacoes = testar_api_tcm()
-    print(f"Total de itens raspados via API: {len(licitacoes)}")
+    licitacoes = extrair_licitacoes(paginas=1)
+    print(f"Total de itens raspados: {len(licitacoes)}")
     atualizar_google_sheets(licitacoes)
