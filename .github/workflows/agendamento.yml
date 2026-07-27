@@ -1,28 +1,32 @@
-name: Execucao Diaria TCM-PA
+name: Executar Scraper TCM-PA
 
 on:
   schedule:
-    # Roda todos os dias às 06:00 AM UTC (03:00 AM no horário de Brasília)
-    - cron: '0 6 * * *'
-  workflow_dispatch: # Permite que você clique em um botão para testar manualmente quando quiser
+    # Executa diariamente às 05:00 UTC (02:00 no horário de Brasília)
+    - cron: '0 5 * * *'
+  workflow_dispatch: # Permite executar manualmente no painel do GitHub
 
 jobs:
-  executar:
+  run-scraper:
     runs-on: ubuntu-latest
     steps:
-      - name: Baixar codigo do repositorio
-        uses: actions/checkout@v3
+      - name: Baixar código do repositório
+        uses: actions/checkout@v4
 
-      - name: Configurar ambiente Python
-        uses: actions/setup-python@v4
+      - name: Configurar Python
+        uses: actions/setup-python@v5
         with:
           python-version: '3.10'
 
-      - name: Instalar dependencias
+      - name: Instalar Google Chrome
         run: |
-          pip install -r requirements.txt
+          sudo apt-get update
+          sudo apt-get install -y google-chrome-stable
 
-      - name: Executar Script Python
+      - name: Instalar Dependências Python
+        run: pip install -r requirements.txt
+
+      - name: Executar Scraper
         env:
-          GOOGLE_KEY_JSON: ${{ secrets.GOOGLE_KEY_JSON }}
-        run: python main.py
+          GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+        run: python scraper.py
