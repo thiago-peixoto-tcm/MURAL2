@@ -1,5 +1,6 @@
-DrissionPage
+cloudscraper
 beautifulsoup4
 pandas
 gspread
 google-auth
+requests
