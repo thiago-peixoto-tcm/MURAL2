@@ -2,61 +2,42 @@ import os
 import json
 import time
 from bs4 import BeautifulSoup
-from selenium import webdriver
-from selenium.webdriver.chrome.options import Options
-from selenium.webdriver.chrome.service import Service
-from webdriver_manager.chrome import ChromeDriverManager
+from DrissionPage import ChromiumPage, ChromiumOptions
 import gspread
 from google.oauth2.service_account import Credentials
 
-def iniciar_driver():
-    chrome_options = Options()
-    # Desativa flags que identificam robôs no Linux/GitHub Actions
-    chrome_options.add_argument("--headless=new")
-    chrome_options.add_argument("--no-sandbox")
-    chrome_options.add_argument("--disable-dev-shm-usage")
-    chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    chrome_options.add_argument("--disable-gpu")
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
-    chrome_options.add_argument("--window-size=1920,1080")
-    chrome_options.add_argument("--accept-lang=pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7")
-    
-    # Desativa a flag de automação do WebDriver
-    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
-    chrome_options.add_experimental_option('useAutomationExtension', False)
-    
-    driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
-    
-    # Executa script no navegador para mascarar o Selenium
-    driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
-        'source': '''
-            Object.defineProperty(navigator, 'webdriver', {
-                get: () => undefined
-            })
-        '''
-    })
-    
-    return driver
-
 def extrair_licitacoes(paginas=1):
-    driver = iniciar_driver()
+    # Configura o navegador para rodar em modo Linux sem ser detectado como automação
+    co = ChromiumOptions()
+    co.set_argument('--headless=new')
+    co.set_argument('--no-sandbox')
+    co.set_argument('--disable-dev-shm-usage')
+    co.set_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
+    
+    page_driver = ChromiumPage(co)
     dados = []
     
     try:
-        for page in range(1, paginas + 1):
-            print(f"Buscando página {page}...")
-            url = f"https://www.tcmpa.tc.br/mural-de-licitacoes/licitacoes/listagem?page={page}&per-page=100"
+        for page_num in range(1, paginas + 1):
+            print(f"Buscando página {page_num}...")
+            url = f"https://www.tcmpa.tc.br/mural-de-licitacoes/licitacoes/listagem?page={page_num}&per-page=100"
             
-            driver.get(url)
-            time.sleep(8)  # Tempo para passar pela checagem do WAF
+            page_driver.get(url)
             
-            soup = BeautifulSoup(driver.page_source, 'html.parser')
+            # Aguarda e tenta contornar o desafio do Cloudflare
+            for tempo in range(15):
+                title = page_driver.title
+                if "Attention Required" not in title and "Cloudflare" not in title:
+                    break
+                print(f"Aguardando liberação do Cloudflare ({tempo+1}s)...")
+                time.sleep(1)
+
+            html = page_driver.html
+            soup = BeautifulSoup(html, 'html.parser')
             tbody = soup.find('tbody')
             
             if not tbody:
-                print(f"Tabela vazia ou não encontrada na página {page}.")
-                # Print para depuração no log do GitHub Actions caso bloqueie
-                print("Título da página recebida:", driver.title)
+                print(f"Tabela vazia na página {page_num}. Título atual: {page_driver.title}")
                 continue
                 
             linhas = tbody.find_all('tr')
@@ -88,7 +69,7 @@ def extrair_licitacoes(paginas=1):
                 ]
                 dados.append(item)
     finally:
-        driver.quit()
+        page_driver.quit()
         
     return dados
 
