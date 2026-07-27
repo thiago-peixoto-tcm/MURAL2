@@ -2,9 +2,8 @@ name: Executar Scraper TCM-PA
 
 on:
   schedule:
-    # Executa diariamente às 05:00 UTC (02:00 no horário de Brasília)
     - cron: '0 5 * * *'
-  workflow_dispatch: # Permite executar manualmente no painel do GitHub
+  workflow_dispatch:
 
 jobs:
   run-scraper:
@@ -18,10 +17,10 @@ jobs:
         with:
           python-version: '3.10'
 
-      - name: Instalar Google Chrome
+      - name: Instalar Firefox e Geckodriver
         run: |
           sudo apt-get update
-          sudo apt-get install -y google-chrome-stable
+          sudo apt-get install -y firefox firefox-geckodriver
 
       - name: Instalar Dependências Python
         run: pip install -r requirements.txt
