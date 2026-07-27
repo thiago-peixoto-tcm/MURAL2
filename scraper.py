@@ -11,15 +11,31 @@ from google.oauth2.service_account import Credentials
 
 def iniciar_driver():
     chrome_options = Options()
-    # Configurações para simular um navegador desktop comum e ignorar o WAF
+    # Desativa flags que identificam robôs no Linux/GitHub Actions
     chrome_options.add_argument("--headless=new")
     chrome_options.add_argument("--no-sandbox")
     chrome_options.add_argument("--disable-dev-shm-usage")
     chrome_options.add_argument("--disable-blink-features=AutomationControlled")
-    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36")
+    chrome_options.add_argument("--disable-gpu")
+    chrome_options.add_argument("user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36")
     chrome_options.add_argument("--window-size=1920,1080")
+    chrome_options.add_argument("--accept-lang=pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7")
+    
+    # Desativa a flag de automação do WebDriver
+    chrome_options.add_experimental_option("excludeSwitches", ["enable-automation"])
+    chrome_options.add_experimental_option('useAutomationExtension', False)
     
     driver = webdriver.Chrome(service=Service(ChromeDriverManager().install()), options=chrome_options)
+    
+    # Executa script no navegador para mascarar o Selenium
+    driver.execute_cdp_cmd('Page.addScriptToEvaluateOnNewDocument', {
+        'source': '''
+            Object.defineProperty(navigator, 'webdriver', {
+                get: () => undefined
+            })
+        '''
+    })
+    
     return driver
 
 def extrair_licitacoes(paginas=1):
@@ -32,13 +48,15 @@ def extrair_licitacoes(paginas=1):
             url = f"https://www.tcmpa.tc.br/mural-de-licitacoes/licitacoes/listagem?page={page}&per-page=100"
             
             driver.get(url)
-            time.sleep(5)  # Tempo para renderização da página e contorno do WAF
+            time.sleep(8)  # Tempo para passar pela checagem do WAF
             
             soup = BeautifulSoup(driver.page_source, 'html.parser')
             tbody = soup.find('tbody')
             
             if not tbody:
                 print(f"Tabela vazia ou não encontrada na página {page}.")
+                # Print para depuração no log do GitHub Actions caso bloqueie
+                print("Título da página recebida:", driver.title)
                 continue
                 
             linhas = tbody.find_all('tr')
@@ -47,7 +65,6 @@ def extrair_licitacoes(paginas=1):
                 if len(colunas) < 11:
                     continue
                     
-                # Extração do link da ficha
                 link_tag = colunas[1].find('a')
                 link_ficha = ""
                 if link_tag and 'href' in link_tag.attrs:
@@ -55,18 +72,18 @@ def extrair_licitacoes(paginas=1):
                     link_ficha = href if href.startswith('http') else f"https://www.tcmpa.tc.br{href}"
 
                 item = [
-                    colunas[0].get_text(strip=True),  # Legislação
-                    colunas[1].get_text(strip=True),  # Número
-                    colunas[2].get_text(strip=True),  # Modalidade
-                    colunas[3].get_text(strip=True),  # Tipo
-                    colunas[4].get_text(strip=True),  # Objeto
-                    colunas[5].get_text(strip=True),  # Abertura
-                    colunas[6].get_text(strip=True),  # Publicação
-                    colunas[7].get_text(strip=True),  # Município
-                    colunas[8].get_text(strip=True),  # Órgão
-                    colunas[9].get_text(strip=True),  # Situação
-                    colunas[10].get_text(strip=True), # Referência
-                    colunas[11].get_text(strip=True) if len(colunas) > 11 else "", # Adjudicado
+                    colunas[0].get_text(strip=True),
+                    colunas[1].get_text(strip=True),
+                    colunas[2].get_text(strip=True),
+                    colunas[3].get_text(strip=True),
+                    colunas[4].get_text(strip=True),
+                    colunas[5].get_text(strip=True),
+                    colunas[6].get_text(strip=True),
+                    colunas[7].get_text(strip=True),
+                    colunas[8].get_text(strip=True),
+                    colunas[9].get_text(strip=True),
+                    colunas[10].get_text(strip=True),
+                    colunas[11].get_text(strip=True) if len(colunas) > 11 else "",
                     link_ficha
                 ]
                 dados.append(item)
@@ -85,12 +102,10 @@ def atualizar_google_sheets(dados):
         'https://www.googleapis.com/auth/drive'
     ]
     
-    # Lendo as credenciais da variável de ambiente do GitHub Secrets
     creds_json = json.loads(os.environ['GCP_CREDENTIALS'])
     creds = Credentials.from_service_account_info(creds_json, scopes=scopes)
     client = gspread.authorize(creds)
     
-    # Nome exato da sua planilha no Google Drive
     sheet = client.open("BaseLicitacoes").sheet1
     
     cabecalhos = [
