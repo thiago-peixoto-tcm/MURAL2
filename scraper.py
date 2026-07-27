@@ -5,32 +5,35 @@ from bs4 import BeautifulSoup
 import gspread
 from google.oauth2.service_account import Credentials
 
-def extrair_licitacoes(paginas=1):
+def extrair_licitacoes():
     api_key = os.environ.get('SCRAPER_API_KEY')
     dados = []
+    page = 1
     
-    for page in range(1, paginas + 1):
+    while True:
         print(f"Buscando página {page} via ScraperAPI...")
         target_url = f"https://www.tcmpa.tc.br/mural-de-licitacoes/licitacoes/listagem?page={page}&per-page=100"
-        
-        # ScraperAPI fura o Cloudflare usando IP residencial do Brasil
         scraper_url = f"http://api.scraperapi.com?api_key={api_key}&url={target_url}&country_code=br"
         
         try:
             response = requests.get(scraper_url, timeout=90)
             if response.status_code != 200:
-                print(f"Erro na requisição. Status: {response.status_code}")
-                continue
+                print(f"Erro na requisição da página {page}. Status: {response.status_code}")
+                break
                 
             soup = BeautifulSoup(response.text, 'html.parser')
             tbody = soup.find('tbody')
             
             if not tbody:
-                print(f"Tabela não encontrada na página {page}.")
-                continue
+                print(f"Nenhuma tabela encontrada na página {page}. Fim da raspagem.")
+                break
                 
             linhas = tbody.find_all('tr')
-            print(f"✅ SUCESSO! Encontradas {len(linhas)} licitações na página {page}.")
+            if not linhas:
+                print(f"Página {page} sem registros. Finalizando extração.")
+                break
+                
+            print(f"✅ Página {page}: Encontradas {len(linhas)} licitações.")
             
             for linha in linhas:
                 colunas = linha.find_all('td')
@@ -59,10 +62,20 @@ def extrair_licitacoes(paginas=1):
                     link_ficha
                 ]
                 dados.append(item)
+                
+            # Avança para a próxima página
+            page += 1
+            
         except Exception as e:
             print(f"Erro ao processar página {page}: {e}")
+            break
             
     return dados
+
+if __name__ == "__main__":
+    licitacoes = extrair_licitacoes() # Agoras raspa todas as páginas automaticamente!
+    print(f"Total geral de itens raspados: {len(licitacoes)}")
+    atualizar_google_sheets(licitacoes)
 
 def atualizar_google_sheets(dados):
     if not dados:
