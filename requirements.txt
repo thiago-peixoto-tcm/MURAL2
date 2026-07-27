@@ -1,5 +1,6 @@
-requests
-pandas
+selenium
+webdriver-manager
 beautifulsoup4
+pandas
 gspread
 google-auth
