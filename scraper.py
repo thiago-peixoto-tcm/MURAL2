@@ -1,46 +1,53 @@
 import os
 import json
 import time
+import cloudscraper
 from bs4 import BeautifulSoup
-from DrissionPage import ChromiumPage, ChromiumOptions
 import gspread
 from google.oauth2.service_account import Credentials
 
 def extrair_licitacoes(paginas=1):
-    # Configura o navegador para rodar em modo Linux sem ser detectado como automação
-    co = ChromiumOptions()
-    co.set_argument('--headless=new')
-    co.set_argument('--no-sandbox')
-    co.set_argument('--disable-dev-shm-usage')
-    co.set_argument('--user-agent=Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36')
+    # Cria uma instância do Cloudscraper simulando um navegador Chrome no Windows
+    scraper = cloudscraper.create_scraper(
+        browser={
+            'browser': 'chrome',
+            'platform': 'windows',
+            'desktop': True
+        }
+    )
     
-    page_driver = ChromiumPage(co)
+    # Cabeçalhos extras para reforçar a navegação em Português do Brasil
+    scraper.headers.update({
+        'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+        'Referer': 'https://www.tcmpa.tc.br/mural-de-licitacoes/'
+    })
+    
     dados = []
     
-    try:
-        for page_num in range(1, paginas + 1):
-            print(f"Buscando página {page_num}...")
-            url = f"https://www.tcmpa.tc.br/mural-de-licitacoes/licitacoes/listagem?page={page_num}&per-page=100"
+    for page in range(1, paginas + 1):
+        print(f"Buscando página {page}...")
+        url = f"https://www.tcmpa.tc.br/mural-de-licitacoes/licitacoes/listagem?page={page}&per-page=100"
+        
+        try:
+            response = scraper.get(url, timeout=30)
             
-            page_driver.get(url)
-            
-            # Aguarda e tenta contornar o desafio do Cloudflare
-            for tempo in range(15):
-                title = page_driver.title
-                if "Attention Required" not in title and "Cloudflare" not in title:
-                    break
-                print(f"Aguardando liberação do Cloudflare ({tempo+1}s)...")
-                time.sleep(1)
-
-            html = page_driver.html
-            soup = BeautifulSoup(html, 'html.parser')
+            if response.status_code != 200:
+                print(f"Erro na requisição. Status: {response.status_code}")
+                continue
+                
+            soup = BeautifulSoup(response.text, 'html.parser')
             tbody = soup.find('tbody')
             
             if not tbody:
-                print(f"Tabela vazia na página {page_num}. Título atual: {page_driver.title}")
+                print(f"Tabela vazia na página {page}.")
+                # Verifica se ainda caiu no Cloudflare
+                if "Attention Required" in response.text or "Cloudflare" in response.text:
+                    print("AVISO: Cloudflare ainda interceptou a chamada.")
                 continue
                 
             linhas = tbody.find_all('tr')
+            print(f"Encontradas {len(linhas)} linhas na tabela!")
+            
             for linha in linhas:
                 colunas = linha.find_all('td')
                 if len(colunas) < 11:
@@ -68,9 +75,10 @@ def extrair_licitacoes(paginas=1):
                     link_ficha
                 ]
                 dados.append(item)
-    finally:
-        page_driver.quit()
-        
+                
+        except Exception as e:
+            print(f"Erro ao processar página {page}: {e}")
+            
     return dados
 
 def atualizar_google_sheets(dados):
