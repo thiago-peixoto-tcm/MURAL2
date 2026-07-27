@@ -20,7 +20,8 @@ jobs:
       - name: Instalar Dependências Python
         run: pip install -r requirements.txt
 
-      - name: Executar Scraper API
+      - name: Executar Scraper
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
+          SCRAPER_API_KEY: ${{ secrets.SCRAPER_API_KEY }}
         run: python scraper.py
