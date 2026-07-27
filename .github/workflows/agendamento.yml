@@ -20,10 +20,7 @@ jobs:
       - name: Instalar Dependências Python
         run: pip install -r requirements.txt
 
-      - name: Instalar Navegadores Playwright
-        run: python -m playwright install firefox --with-deps
-
-      - name: Executar Scraper
+      - name: Executar Scraper API
         env:
           GCP_CREDENTIALS: ${{ secrets.GCP_CREDENTIALS }}
         run: python scraper.py
