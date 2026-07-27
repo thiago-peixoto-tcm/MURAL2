@@ -1,110 +1,113 @@
 import os
-import json
+import time
 import requests
 from bs4 import BeautifulSoup
-import gspread
-from google.oauth2.service_account import Credentials
+import pandas as pd
+from concurrent.futures import ThreadPoolExecutor, as_completed
 
-def extrair_licitacoes():
-    api_key = os.environ.get('SCRAPER_API_KEY')
-    dados = []
-    page = 1
+# Configurações de Cabeçalho para Simular Navegador Real
+HEADERS = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7',
+    'Referer': 'https://www.tcmpa.tc.br/mural-de-licitacoes/licitacoes/listagem'
+}
+
+def raspar_pagina(page):
+    url = f"https://www.tcmpa.tc.br/mural-de-licitacoes/licitacoes/listagem?page={page}"
     
-    while True:
-        print(f"Buscando página {page} via ScraperAPI...")
-        target_url = f"https://www.tcmpa.tc.br/mural-de-licitacoes/licitacoes/listagem?page={page}&per-page=100"
-        scraper_url = f"http://api.scraperapi.com?api_key={api_key}&url={target_url}&country_code=br"
-        
+    for tentativa in range(3):
         try:
-            response = requests.get(scraper_url, timeout=90)
-            if response.status_code != 200:
-                print(f"Erro na requisição da página {page}. Status: {response.status_code}")
-                break
+            response = requests.get(url, headers=HEADERS, timeout=20)
+            if response.status_code == 200:
+                soup = BeautifulSoup(response.text, 'html.parser')
+                tbody = soup.find('tbody')
+                if not tbody:
+                    return page, []
                 
-            soup = BeautifulSoup(response.text, 'html.parser')
-            tbody = soup.find('tbody')
-            
-            if not tbody:
-                print(f"Nenhuma tabela encontrada na página {page}. Fim da raspagem.")
-                break
+                linhas = tbody.find_all('tr')
+                if not linhas:
+                    return page, []
                 
-            linhas = tbody.find_all('tr')
-            if not linhas:
-                print(f"Página {page} sem registros. Finalizando extração.")
-                break
-                
-            print(f"✅ Página {page}: Encontradas {len(linhas)} licitações.")
-            
-            for linha in linhas:
-                colunas = linha.find_all('td')
-                if len(colunas) < 11:
-                    continue
-                    
-                link_tag = colunas[1].find('a')
-                link_ficha = ""
-                if link_tag and 'href' in link_tag.attrs:
-                    href = link_tag['href']
-                    link_ficha = href if href.startswith('http') else f"https://www.tcmpa.tc.br{href}"
+                dados_pagina = []
+                for linha in linhas:
+                    colunas = linha.find_all('td')
+                    if len(colunas) < 11:
+                        continue
+                        
+                    link_tag = colunas[1].find('a')
+                    link_ficha = ""
+                    if link_tag and 'href' in link_tag.attrs:
+                        href = link_tag['href']
+                        link_ficha = href if href.startswith('http') else f"https://www.tcmpa.tc.br{href}"
 
-                item = [
-                    colunas[0].get_text(strip=True),
-                    colunas[1].get_text(strip=True),
-                    colunas[2].get_text(strip=True),
-                    colunas[3].get_text(strip=True),
-                    colunas[4].get_text(strip=True),
-                    colunas[5].get_text(strip=True),
-                    colunas[6].get_text(strip=True),
-                    colunas[7].get_text(strip=True),
-                    colunas[8].get_text(strip=True),
-                    colunas[9].get_text(strip=True),
-                    colunas[10].get_text(strip=True),
-                    colunas[11].get_text(strip=True) if len(colunas) > 11 else "",
-                    link_ficha
-                ]
-                dados.append(item)
-                
-            # Avança para a próxima página
-            page += 1
-            
+                    item = {
+                        "Legislacao": colunas[0].get_text(strip=True),
+                        "Numero": colunas[1].get_text(strip=True),
+                        "Modalidade": colunas[2].get_text(strip=True),
+                        "Tipo": colunas[3].get_text(strip=True),
+                        "Objeto": colunas[4].get_text(strip=True),
+                        "Abertura": colunas[5].get_text(strip=True),
+                        "Publicacao": colunas[6].get_text(strip=True),
+                        "Municipio": colunas[7].get_text(strip=True),
+                        "Orgao": colunas[8].get_text(strip=True),
+                        "Situacao": colunas[9].get_text(strip=True),
+                        "Referencia": colunas[10].get_text(strip=True),
+                        "Adjudicado": colunas[11].get_text(strip=True) if len(colunas) > 11 else "",
+                        "Link_Ficha": link_ficha
+                    }
+                    dados_pagina.append(item)
+                return page, dados_pagina
+            elif response.status_code == 403:
+                time.sleep(1) # Se der 403 temporário, aguarda e tenta de novo
         except Exception as e:
-            print(f"Erro ao processar página {page}: {e}")
-            break
+            time.sleep(1)
             
-    return dados
+    return page, []
+
+def executar_raspagem_total(max_paginas_estimado=4700, max_threads=10):
+    print(f"🚀 Iniciando raspagem massiva paralela (até {max_paginas_estimado} páginas)...")
+    todos_dados = []
+    paginas_vazias_seguidas = 0
+    
+    # Processa em lotes de páginas para controlar a memória e progresso
+    lote_tamanho = 100
+    for inicio in range(1, max_paginas_estimado + 1, lote_tamanho):
+        fim = min(inicio + lote_tamanho - 1, max_paginas_estimado)
+        print(f"📦 Processando lote de páginas {inicio} a {fim}...")
+        
+        with ThreadPoolExecutor(max_workers=max_threads) as executor:
+            futures = [executor.submit(raspar_pagina, p) for p in range(inicio, fim + 1)]
+            
+            # Ordena os resultados para manter a sequência original
+            resultados = []
+            for future in as_completed(futures):
+                p, dados = future.result()
+                resultados.append((p, dados))
+            
+            resultados.sort(key=lambda x: x[0])
+            
+            for p, dados in resultados:
+                if dados:
+                    todos_dados.extend(dados)
+                    paginas_vazias_seguidas = 0
+                else:
+                    paginas_vazias_seguidas += 1
+        
+        print(f"Progresso atual: {len(todos_dados)} licitações capturadas.")
+        
+        # Se 15 páginas seguidas vierem vazias, encerra o processo
+        if paginas_vazias_seguidas >= 15:
+            print("Fim do catálogo de licitações detectado.")
+            break
+
+    print(f"✅ Raspagem finalizada! Total de licitações extraídas: {len(todos_dados)}")
+    
+    # Salva os dados em CSV comprimido ou padrão
+    df = pd.DataFrame(todos_dados)
+    df.to_csv("licitacoes_tcmpa_completo.csv", index=False, encoding='utf-8-sig')
+    print("💾 Arquivo licitacoes_tcmpa_completo.csv gerado com sucesso!")
+    return df
 
 if __name__ == "__main__":
-    licitacoes = extrair_licitacoes() # Agoras raspa todas as páginas automaticamente!
-    print(f"Total geral de itens raspados: {len(licitacoes)}")
-    atualizar_google_sheets(licitacoes)
-
-def atualizar_google_sheets(dados):
-    if not dados:
-        print("Nenhum dado capturado.")
-        return
-
-    scopes = [
-        'https://www.googleapis.com/auth/spreadsheets',
-        'https://www.googleapis.com/auth/drive'
-    ]
-    
-    creds_json = json.loads(os.environ['GCP_CREDENTIALS'])
-    creds = Credentials.from_service_account_info(creds_json, scopes=scopes)
-    client = gspread.authorize(creds)
-    
-    sheet = client.open("BaseLicitacoes").sheet1
-    
-    cabecalhos = [
-        "Legislação", "Número", "Modalidade", "Tipo", "Objeto", 
-        "Abertura", "Publicação", "Município", "Órgão", "Situação", 
-        "Referência", "Adjudicado", "Link_Ficha"
-    ]
-    
-    sheet.clear()
-    sheet.append_row(cabecalhos)
-    sheet.append_rows(dados)
-    print("Planilha BaseLicitacoes atualizada com sucesso no Google Drive!")
-
-if __name__ == "__main__":
-    licitacoes = extrair_licitacoes(paginas=1)
-    print(f"Total de itens raspados: {len(licitacoes)}")
-    atualizar_google_sheets(licitacoes)
+    executar_raspagem_total()
